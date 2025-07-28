@@ -1,2 +1,2 @@
-# POO_Polarm_66
-Repositorio del proyecto de Programación Orientada a Objetos (P66)
+# POO_P66_JEX
+Realizado para la asignatura de Programación Orientada a Objetos (POO)

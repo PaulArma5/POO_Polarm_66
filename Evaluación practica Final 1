@@ -1,0 +1,275 @@
+# modelo/base_datos.py
+import sqlite3
+from datetime import datetime
+
+class BaseDatos:
+    def __init__(self, db_name="datos/monitoreo.db"):
+        self.conn = sqlite3.connect(db_name,
+                                    check_same_thread=False)
+        self.crear_tablas()
+
+    def crear_tablas(self):
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS
+            dispositivo (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nombre TEXT NOT NULL
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS
+            transformador (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                descripcion TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS
+            sensor (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tipo TEXT NOT NULL,
+                fase TEXT NOT NULL,
+                dispositivo_id INTEGER
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS
+            medicion (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sensor_id INTEGER,
+                valor REAL NOT NULL,
+                fecha TEXT NOT NULL
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS
+            parametros_calculados (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                fase TEXT NOT NULL,
+                voltaje REAL,
+                corriente REAL,
+                aparente REAL,
+                activa REAL,
+                fp REAL,
+                fecha TEXT NOT NULL
+            )
+        """)
+        self.conn.commit()
+
+    def insertar_parametros(self, fase, v, i, s, p, fp):
+        cursor = self.conn.cursor()
+        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute("""
+            INSERT INTO parametros_calculados
+            (fase, voltaje, corriente, aparente, activa, fp, fecha)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (fase, v, i, s, p, fp, fecha))
+        self.conn.commit()
+
+    def obtener_ultimos(self):
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT id, fase, voltaje, corriente, aparente, activa, fp, fecha FROM parametros_calculados ORDER BY fecha DESC LIMIT 3
+        """)
+        return cursor.fetchall()
+
+    def filtrar_por_fecha_fase(self, fecha, fase):
+        cursor = self.conn.cursor()
+        cursor.execute("""
+            SELECT id, fase, voltaje, corriente, aparente, activa, fp, fecha
+            FROM parametros_calculados WHERE date(fecha) = ?
+            AND fase = ?
+        """, (fecha, fase))
+        return cursor.fetchall()
+
+    def exportar_csv(self, nombre_archivo="exportacion.csv"):
+        import csv
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT id, fase, voltaje, corriente, aparente, activa, fp, fecha FROM parametros_calculados")
+        filas = cursor.fetchall()
+
+        with open(nombre_archivo, 'w', newline='') as archivo:
+            writer = csv.writer(archivo)
+            writer.writerow(["ID", "Fase", "Voltaje", "Corriente", "Aparente", "Activa", "FP", "Fecha"])
+            writer.writerows(filas)
+
+# modelo/simulador.py
+import random
+
+def simular_lectura(tipo):
+    if tipo == 'voltaje':
+        return round(random.uniform(210, 240), 2)
+    elif tipo == 'corriente':
+        return round(random.uniform(4, 10), 2)
+
+def calcular_parametros(v, i, fp=0.85):
+    s = round(v * i, 2)
+    p = round(s * fp, 2)
+    return s, p, fp
+
+# vista/interfaz.py
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+import threading
+import time
+# Assuming base_datos and simulador are in the 'modelo' package
+from modelo.base_datos import BaseDatos
+from modelo.simulador import simular_lectura, calcular_parametros
+
+class Interfaz:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("Monitoreo Trifásico")
+
+        self.db = BaseDatos()
+        self.simulando = False
+
+        self.tabla = ttk.Treeview(self.root,
+                                  columns=("Fase", "V", "I", "S", "P", "FP", "Fecha"),
+                                  show="headings")
+
+        for col in self.tabla["columns"]:
+            self.tabla.heading(col, text=col)
+        self.tabla.pack(padx=10, pady=10)
+
+        self.boton_inicio = ttk.Button(self.root,
+                                       text="Iniciar",
+                                       command=self.iniciar_simulacion)
+        self.boton_inicio.pack(side="left",
+                               padx=10)
+
+        self.boton_detener = ttk.Button(self.root,
+                                        text="Detener",
+                                        command=self.detener_simulacion)
+        self.boton_detener.pack(side="left",
+                                padx=10)
+
+        self.boton_actualizar = ttk.Button(self.root,
+                                           text="Actualizar",
+                                           command=self.actualizar_tabla)
+        self.boton_actualizar.pack(side="left",
+                                   padx=10)
+
+        self.boton_exportar = ttk.Button(self.root,
+                                         text="Exportar CSV",
+                                         command=self.exportar_csv)
+        self.boton_exportar.pack(side="left",
+                                 padx=10)
+
+        self.actualizar_tabla()
+        self.root.mainloop()
+
+    def iniciar_simulacion(self):
+        self.simulando = True
+        threading.Thread(target=self.simular_datos,
+                         daemon=True).start()
+
+    def detener_simulacion(self):
+        self.simulando = False
+
+    def simular_datos(self):
+        while self.simulando:
+            for fase in ["A", "B", "C"]:
+                v = simular_lectura("voltaje")
+                i = simular_lectura("corriente")
+                s, p, fp = calcular_parametros(v, i)
+                self.db.insertar_parametros(fase, v, i, s, p, fp)
+            time.sleep(5)
+            self.actualizar_tabla()
+
+    def actualizar_tabla(self):
+        for fila in self.tabla.get_children():
+            self.tabla.delete(fila)
+
+        registros = self.db.obtener_ultimos()
+
+        for r in registros:
+            self.tabla.insert("", "end", values=[r[1], r[2], r[3], r[4], r[5], r[6], r[7]])
+
+    def exportar_csv(self):
+        self.db.exportar_csv()
+        messagebox.showinfo("Exportación",
+                            "Datos exportados a exportacion.csv")
+
+# controlador/bot.py
+from telegram.ext import Updater, CommandHandler
+# Assuming base_datos is in the 'modelo' package
+from modelo.base_datos import BaseDatos
+
+TOKEN = "7844412290:AAHMZvRMkbyGtLUntzbXZrC3701bDPFM" # This seems to be a Telegram Bot Token
+
+bd = BaseDatos()
+
+def responder(update, context, texto):
+    update.message.reply_text(texto)
+
+def fase(update, context, letra):
+    # This function needs adjustment if you want to filter by phase from the DB
+    # The current `obtener_ultimos()` gets the last 3 regardless of phase.
+    # You might need a new DB method like `obtener_ultimos_por_fase(fase_letra)`
+    # For now, it will just iterate through the last 3 and check the phase.
+    registros = bd.obtener_ultimos() # Gets last 3 records
+    found_data = False
+    for r in registros:
+        if r[1] == letra: # Assuming r[1] is the phase
+            responder(update, context, f"Fase {letra}\nV={r[2]}V\nI={r[3]}\nAp={r[4]}\nAct={r[5]}\nFP={r[6]}\nFecha: {r[7]}")
+            found_data = True
+            break # Assuming you only want the latest for that phase
+    if not found_data:
+        responder(update, context, f"No se encontraron datos recientes para la Fase {letra}.")
+
+
+def fase_a(update, context):
+    fase(update, context, 'A')
+
+def fase_b(update, context):
+    fase(update, context, 'B')
+
+def fase_c(update, context):
+    fase(update, context, 'C')
+
+def ultimos(update, context):
+    registros = bd.obtener_ultimos()
+    if not registros:
+        texto = "No hay datos disponibles."
+    else:
+        texto = "Últimos datos:\n"
+        for r in registros:
+            texto += f"Fase {r[1]} | V={r[2]}V | I={r[3]}A | S={r[4]}VA | P={r[5]}W | FP={r[6]} | Fecha: {r[7]}\n"
+    responder(update, context, texto)
+
+def ayuda(update, context):
+    responder(update, context, """
+Comandos disponibles:
+/faseA - Datos actuales de Fase A
+/faseB - Datos actuales de Fase B
+/faseC - Datos actuales de Fase C
+/ultimos - Últimos datos de todas las fases
+/help - Ver comandos disponibles
+""")
+
+def main_bot():
+    updater = Updater(TOKEN, use_context=True)
+    dp = updater.dispatcher
+
+    dp.add_handler(CommandHandler("faseA", fase_a))
+    dp.add_handler(CommandHandler("faseB", fase_b))
+    dp.add_handler(CommandHandler("faseC", fase_c))
+    dp.add_handler(CommandHandler("ultimos", ultimos))
+    dp.add_handler(CommandHandler("help", ayuda))
+
+    updater.start_polling()
+    updater.idle()
+
+# main.py
+import threading
+# Assuming interfaz is in 'vista' and bot is in 'controlador'
+from vista.interfaz import Interfaz
+from controlador import bot
+
+if __name__ == "__main__":
+    # Start the Telegram bot in a separate thread
+    threading.Thread(target=bot.main_bot, daemon=True).start()
+    # Start the Tkinter GUI in the main thread
+    Interfaz()

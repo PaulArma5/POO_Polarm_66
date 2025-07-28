@@ -1,0 +1,28 @@
+SELECT * FROM crime_scene_report WHERE date = '20180115' AND city = 'SQL City';
+SELECT * FROM person WHERE name LIKE '%Annabel%' AND address_street_name = 'Franklin Ave';
+SELECT * FROM person WHERE address_street_name = 'Northwestern Dr' ORDER BY address_number DESC LIMIT 1;
+
+SELECT person.name, interview.transcript
+FROM person
+JOIN interview ON person.id = interview.person_id
+WHERE person.id = 14887 OR person.id = 16371;
+
+Testigos:
+SELECT * FROM crime_scene_report WHERE date = '20180115' AND city = 'SQL City';
+SELECT * FROM person WHERE name LIKE '%Annabel%' AND address_street_name = 'Franklin Ave';
+SELECT * FROM person WHERE address_street_name = 'Northwestern Dr' ORDER BY address_number DESC LIMIT 1;
+SELECT person.name, interview.transcript
+FROM person
+JOIN interview ON person.id = interview.person_id
+WHERE person.id = 14887 OR person.id = 16371;
+
+Posibles asesinos:
+WITH gym_checkins AS (
+SELECT person_id, name
+FROM get_fit_now_member
+JOIN get_fit_now_check_in ON get_fit_now_member.id = get_fit_now_check_in.membership_id
+WHERE membership_status = 'gold'
+AND id LIKE '482%'
+AND check_in_date = '20180109'
+)
+SELECT * FROM gym_checkins;
